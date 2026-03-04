@@ -1,30 +1,63 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import errors
 import os
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 load_dotenv()
 
+import time
+
+# RPM 제한을 위한 마지막 호출 시간 기록
+last_call_time = 0
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    retry=retry_if_exception_type(errors.ClientError),
+    reraise=True
+)
+def generate_content_with_retry(client, model_name, prompt):
+    """
+    할당량 초과(429) 시 재시도를 포함하여 콘텐츠를 생성합니다.
+    분당 요청 제한(RPM 5)을 위해 호출 전 대기 시간을 가집니다.
+    """
+    global last_call_time
+    
+    # 마지막 호출로부터 최소 15초(RPM 4 목표)가 경과했는지 확인
+    elapsed = time.time() - last_call_time
+    if elapsed < 15:
+        wait_time = 15 - elapsed
+        print(f"RPM 제한을 위해 {wait_time:.1f}초 대기 중...")
+        time.sleep(wait_time)
+        
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        last_call_time = time.time() # 성공적으로 호출한 시간 기록
+        return response.text
+    except errors.ClientError as e:
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            print(f"API 할당량 초과. 재시도 중... ({e})")
+            raise e
+        raise e
+
 def summarize_content(items, category="뉴스"):
     """
-    수집된 항목들을 Gemini 3 Flash를 사용하여 요약합니다.
+    수집된 항목들을 최신 google.genai SDK를 사용하여 요약합니다.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return "API 키가 설정되지 않았습니다."
     
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     
-    # Gemini 3 Flash 모델 설정 (모델명이 정식 출시 전후로 다를 수 있으나, 최신 모델명 가이드에 따름)
-    # 현재 시점에서 gemini-2.0-flash 등의 명칭이 쓰일 수 있으나 요구사항대로 'gemini-3-flash' 지향
-    # 실제 API에서 지원하는 모델명 확인 필요 (보통 gemini-1.5-flash가 최신 범용)
-    # 여기서는 요구사항에 맞춰 모델 식별자 설정 (실제 동작을 위해 1.5-flash로 폴백하거나 안내 필요할 수 있음)
-    model_name = "gemini-3-flash-preview" # 현재 실존하는 가장 최신 모델명으로 설정, 혹은 명시적 요청 반영
-    
-    try:
-        model = genai.GenerativeModel(model_name)
-    except:
-        # 모델명을 찾지 못할 경우 범용 모델로 폴백
-        model = genai.GenerativeModel("gemini-2.5-flash")
+    # gemini-3-flash는 현재 하루 20회 요청으로 제한이 매우 엄격합니다.
+    # 성능이 뛰어나고 할당량(분당 15회)이 더 넉넉한 gemini-2.0-flash를 사용합니다.
+    model_name = "gemini-3-flash-preview" 
+    # model_name = "gemini-2.5-flash-lite"
 
     prompt = f"""
     당신은 난임 및 생명공학(배아 발생학) 전문가입니다. 다음 제공된 {category} 목록을 바탕으로 주간 브리핑을 작성해 주세요.
@@ -41,8 +74,10 @@ def summarize_content(items, category="뉴스"):
     {items}
     """
     
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        return generate_content_with_retry(client, model_name, prompt)
+    except Exception as e:
+        return f"요약 생성 중 오류 발생: {e}"
 
 if __name__ == "__main__":
     # 테스트 코드
