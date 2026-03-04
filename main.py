@@ -11,7 +11,7 @@ def main():
     print("난임 및 배아 연구 동향 리서치 시작...")
 
     # 1. 뉴스 데이터 수집
-    news_items = get_google_news("난임 시험관 아기 인공수정", days=7,max_results=10)
+    news_items = get_google_news("난임 시험관 아기 인공수정 배아 수정란 Embryo quality ivf infertility biotechnology", days=7,max_results=10)
 
     print(f"수집된 뉴스 개수: {len(news_items)}")
     
