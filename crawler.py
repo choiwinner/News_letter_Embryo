@@ -51,9 +51,6 @@ def get_article_image(url):
     newspaper4k 및 메타데이터를 사용하여 기사 URL에서 주요 이미지 URL을 추출합니다.
     """
     try:
-        if "news.google.com" in url:
-            url = resolve_google_news_url(url)
-            
         if "google.com" in url and "rss/articles" not in url:
             return None
 
@@ -100,11 +97,12 @@ def get_google_news(keywords="난임", days=7, max_results=10):
     
     for entry in feed.entries[:max_results]:
         # 뉴스 기사의 실제 원본 URL을 찾기 위해 처리
-        image_url = get_article_image(entry.link)
+        decoded_url = resolve_google_news_url(entry.link)
+        image_url = get_article_image(decoded_url)
         
         results.append({
             "title": entry.title,
-            "link": entry.link,
+            "link": decoded_url,
             "published": entry.published,
             "source": "Google News",
             "image_url": image_url
