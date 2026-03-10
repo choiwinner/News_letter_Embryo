@@ -30,16 +30,21 @@ def resolve_google_news_url(url):
     Google 뉴스 RSS URL을 디코딩하여 원본 기사 주소를 반환합니다.
     """
     try:
-        # 1. googlenewsdecoder 시도
+        # 1. google.com 링크가 아니면 그대로 반환
+        if "google.com" not in url:
+            return url
+
+        # 2. googlenewsdecoder 시도
         result = gnewsdecoder(url)
         if result.get("status") and result.get("decoded_url"):
             return result["decoded_url"]
         
-        # 2. 실패 시 requests로 리디렉션 추적 (일부 케이스 대응)
+        # 3. 실패 시 requests로 리디렉션 추적
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, allow_redirects=True, timeout=5)
+        # 인증서 검증 무시 (일부 언론사 사이트 대응)
+        response = requests.get(url, headers=headers, allow_redirects=True, timeout=10, verify=False)
         if response.url and "google.com" not in response.url:
             return response.url
             
@@ -51,63 +56,53 @@ def resolve_google_news_url(url):
 def get_article_image(url, retries=2, delay=1.5):
     """
     newspaper4k 및 메타데이터를 사용하여 기사 URL에서 주요 이미지 URL을 추출합니다.
-    실패 시 재시도 로직을 포함합니다.
     """
+    if not url or url == "#":
+        return None
+
     for attempt in range(retries + 1):
         try:
-            if "google.com" in url and "rss/articles" not in url:
-                return None
-                
             article = Article(url, language='ko', config=config)
             article.download()
             
-            # 다운로드 실패 시 재시도
-            if not article.html or len(article.html) < 200:
-                raise Exception("HTML 내용이 너무 짧거나 비어 있음")
+            if not article.html:
+                raise Exception("HTML 다운로드 실패")
                 
             article.parse()
             
-            # 1. newspaper4k의 기본 top_image 시도
+            # 1. newspaper4k의 기본 top_image
             image = article.top_image
             
-            # 2. 실패 시 OpenGraph 또는 Twitter 메타데이터 직접 확인
+            # 2. 메타데이터 직접 확인
             if not image or "googleusercontent.com" in image or "gstatic.com" in image:
                 image = article.meta_data.get('og', {}).get('image')
                 if not image:
                     image = article.meta_data.get('twitter', {}).get('image')
             
-            # 3. 절대 경로 확인 및 구글 서버 이미지 필터링
             if image:
+                # 절대 경로 처리
                 if not image.startswith('http'):
                     from urllib.parse import urljoin
                     image = urljoin(url, image)
-                    
-                if "googleusercontent.com" in image or "gstatic.com" in image:
-                    return None
                 
-                # 이미지 URL이 유효한지 가볍게 확인 (헤더만)
-                try:
-                    img_check = requests.head(image, headers={'User-Agent': config.browser_user_agent, 'Referer': url}, timeout=5)
-                    if img_check.status_code != 200:
-                        # 404 등의 경우 다시 한 번 GET 시도 (일부 서버 대응)
-                        img_check = requests.get(image, headers={'User-Agent': config.browser_user_agent, 'Referer': url}, timeout=5, stream=True)
-                        if img_check.status_code != 200:
-                            image = None
-                except:
-                    pass
+                # 원본 URL이 문자열이 아닌 경우(리스트 등) 대응
+                if isinstance(image, list) and len(image) > 0:
+                    image = image[0]
+
+                # 구글 서버 이미지 필터링
+                if any(domain in image for domain in ["googleusercontent.com", "gstatic.com", "google.com"]):
+                    image = None
+                else:
+                    return image
             
-            if image:
-                return image
-            
-            # 이미지를 찾지 못한 경우 잠시 대기 후 재시도
             if attempt < retries:
                 time.sleep(delay)
                 
         except Exception as e:
             if attempt < retries:
-                time.sleep(delay * (attempt + 1)) # 점진적 대기
+                time.sleep(delay * (attempt + 1))
                 continue
-            print(f"이미지 추출 최종 실패 ({url}): {e}")
+            print(f"이미지 추출 실패 ({url}): {e}")
             
     return None
 

@@ -49,57 +49,60 @@ def format_as_html(news_summary, paper_summary):
 
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    def process_summary(text):
+    def process_summary(text, show_image=True):
         processed = []
-        # 뉴스 항목들을 분리
-        items = re.split(r'\n\s*\n|\n(?=\d+\.\s*제목:)', text)
+        # 제목을 기준으로 기사 분리
+        items = re.split(r'\n(?=\d+\.\s*제목:)', text)
         
         for item in items:
             if not item.strip(): continue
             
             def clean_url(url_str):
-                if not url_str: return None
-                match = re.search(r'!?\[.*?\]\((https?://\S+?)\)', url_str)
+                if not url_str: return "#"
+                # 마크다운 링크 형식 [text](url) 제거
+                match = re.search(r'\[.*?\]\((https?://\S+?)\)', url_str)
                 if match:
                     return match.group(1).rstrip(')]')
-                return url_str.strip('[]() ')
+                # 괄호 제거
+                url = url_str.strip('[]() \n\r\t')
+                if not url.startswith('http'):
+                    match = re.search(r'https?://\S+', url)
+                    if match:
+                        return match.group(0)
+                return url
 
             # 이미지 URL 추출
-            img_match = re.search(r'(?:\d+\.\s*)?Image:\s*(\S+)', item, re.IGNORECASE)
             img_url = None
-            if img_match:
-                img_url = clean_url(img_match.group(1))
-                if img_url and ("None" in img_url or "googleusercontent.com" in img_url):
-                    img_url = None
-            
-            if not img_url:
-                img_urls = re.findall(r'https?://\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S+)?', item, re.IGNORECASE)
-                if img_urls:
-                    img_url = clean_url(img_urls[0])
-                    if img_url and ("googleusercontent.com" in img_url or "gstatic.com" in img_url):
+            if show_image:
+                img_match = re.search(r'Image:\s*(\S+)', item, re.IGNORECASE)
+                if img_match:
+                    img_url = clean_url(img_match.group(1))
+                    if "None" in img_url or "google" in img_url:
                         img_url = None
 
-            # URL 추출 및 본문 내 URL 안내 제거 (번호가 없거나 다른 경우에도 대응)
-            url_match = re.search(r'(?:\d+\.\s*)?URL:\s*(\S+)', item, re.IGNORECASE)
+            # 기사 URL 추출
+            url_match = re.search(r'URL:\s*(\S+)', item, re.IGNORECASE)
             article_url = "#"
             if url_match:
-                raw_url = url_match.group(1)
-                article_url = clean_url(raw_url)
+                article_url = clean_url(url_match.group(1))
 
-            # 본문 내 URL 및 '더 알아보기' 문구 제거
-            item_html = item.replace('\n', '<br>')
-            # 형식 태그 및 URL 라벨 제거 (URL 라벨 줄 전체 제거)
-            item_html = re.sub(r'(<br>)?(?:\d+\.\s*)?Image:.*', '', item_html, flags=re.IGNORECASE)
-            item_html = re.sub(r'(<br>)?(?:\d+\.\s*)?URL:.*', '', item_html, flags=re.IGNORECASE)
+            # 본문 가공: 제목, 요약만 남기기
+            lines = item.split('\n')
+            display_lines = []
+            for line in lines:
+                if any(x in line.upper() for x in ["제목:", "요약:"]):
+                    # '제목:' 또는 '요약:' 레이블 제거
+                    clean_line = re.sub(r'^\d*\.?\s*(제목|요약):\s*', '', line, flags=re.IGNORECASE).strip()
+                    if clean_line:
+                        if "제목:" in line:
+                            display_lines.append(f'<strong style="font-size: 17px; color: #1a365d; display: block; margin-bottom: 8px;">{clean_line}</strong>')
+                        else:
+                            display_lines.append(clean_line)
             
-            # 본문 내 '더 알아보기' 텍스트 제거 (중복 방지)
-            item_html = item_html.replace('더 알아보기', '')
+            item_html = "<br>".join(display_lines)
             
-            # 불필요한 공백/줄바꿈 정리
-            item_html = re.sub(r'(<br>\s*)+', '<br>', item_html).strip('<br> ')
-            
-            # 카드 레이아웃 (테이블 기반)
-            if img_url:
+            # 카드 레이아웃
+            if img_url and show_image:
                 content_html = f"""
                 <tr>
                     <td class="mobile-padding" style="padding: 25px 20px; border-bottom: 1px solid #eeeeee;">
@@ -107,7 +110,7 @@ def format_as_html(news_summary, paper_summary):
                             <tr>
                                 <td class="stack-column" width="30%" style="vertical-align: top; padding-right: 20px;">
                                     <a href="{article_url}" target="_blank" style="text-decoration: none;">
-                                        <img src="{img_url}" alt="News Image" style="width: 100%; height: 140px; aspect-ratio: 1/1; object-fit: cover; border-radius: 8px; border: 1px solid #f0f0f0;" onerror="this.style.display='none'">
+                                        <img src="{img_url}" alt="News Image" style="width: 100%; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid #f0f0f0;" onerror="this.style.display='none'">
                                     </a>
                                 </td>
                                 <td class="stack-column" width="70%" style="vertical-align: top;">
@@ -115,7 +118,7 @@ def format_as_html(news_summary, paper_summary):
                                         {item_html}
                                     </div>
                                     <div style="margin-top: 15px;">
-                                        <a href="{article_url}" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
+                                        <a href="{article_url}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
                                     </div>
                                 </td>
                             </tr>
@@ -131,7 +134,7 @@ def format_as_html(news_summary, paper_summary):
                             {item_html}
                         </div>
                         <div style="margin-top: 15px;">
-                            <a href="{article_url}" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
+                            <a href="{article_url}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
                         </div>
                     </td>
                 </tr>
@@ -140,8 +143,8 @@ def format_as_html(news_summary, paper_summary):
         
         return "\n".join(processed)
 
-    news_items_html = process_summary(news_summary)
-    paper_items_html = process_summary(paper_summary)
+    news_items_html = process_summary(news_summary, show_image=True)
+    paper_items_html = process_summary(paper_summary, show_image=False)
 
     html = f"""
     <!DOCTYPE html>
