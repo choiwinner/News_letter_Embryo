@@ -39,7 +39,7 @@ def send_newsletter(content_html, subject="[주간 리포트] 난임 치료 및 
         print(f"이메일 발송 실패: {e}")
         return False
 
-def format_as_html(news_summary, paper_summary):
+def format_as_html(news_summary, paper_summary, graph_base64=None):
     """
     요약된 내용을 이메일용 HTML로 변환합니다.
     News_html_ex.html의 스타일을 참조하여 가독성이 높고 프리미엄한 디자인을 적용합니다.
@@ -49,60 +49,57 @@ def format_as_html(news_summary, paper_summary):
 
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    def process_summary(text, show_image=True):
+    def process_summary(text):
         processed = []
-        # 제목을 기준으로 기사 분리
-        items = re.split(r'\n(?=\d+\.\s*제목:)', text)
+        # 뉴스 항목들을 분리
+        items = re.split(r'\n\s*\n|\n(?=\d+\.\s*제목:)', text)
         
         for item in items:
             if not item.strip(): continue
             
             def clean_url(url_str):
-                if not url_str: return "#"
-                # 마크다운 링크 형식 [text](url) 제거
-                match = re.search(r'\[.*?\]\((https?://\S+?)\)', url_str)
+                if not url_str: return None
+                match = re.search(r'!?\[.*?\]\((https?://\S+?)\)', url_str)
                 if match:
                     return match.group(1).rstrip(')]')
-                # 괄호 제거
-                url = url_str.strip('[]() \n\r\t')
-                if not url.startswith('http'):
-                    match = re.search(r'https?://\S+', url)
-                    if match:
-                        return match.group(0)
-                return url
+                return url_str.strip('[]() ')
 
             # 이미지 URL 추출
+            img_match = re.search(r'(?:\d+\.\s*)?Image:\s*(\S+)', item, re.IGNORECASE)
             img_url = None
-            if show_image:
-                img_match = re.search(r'Image:\s*(\S+)', item, re.IGNORECASE)
-                if img_match:
-                    img_url = clean_url(img_match.group(1))
-                    if "None" in img_url or "google" in img_url:
+            if img_match:
+                img_url = clean_url(img_match.group(1))
+                if img_url and ("None" in img_url or "googleusercontent.com" in img_url):
+                    img_url = None
+            
+            if not img_url:
+                img_urls = re.findall(r'https?://\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S+)?', item, re.IGNORECASE)
+                if img_urls:
+                    img_url = clean_url(img_urls[0])
+                    if img_url and ("googleusercontent.com" in img_url or "gstatic.com" in img_url):
                         img_url = None
 
-            # 기사 URL 추출
-            url_match = re.search(r'URL:\s*(\S+)', item, re.IGNORECASE)
+            # URL 추출 및 본문 내 URL 안내 제거 (번호가 없거나 다른 경우에도 대응)
+            url_match = re.search(r'(?:\d+\.\s*)?URL:\s*(\S+)', item, re.IGNORECASE)
             article_url = "#"
             if url_match:
-                article_url = clean_url(url_match.group(1))
+                raw_url = url_match.group(1)
+                article_url = clean_url(raw_url)
 
-            # 본문 가공: 제목, 요약만 남기기
-            lines = item.split('\n')
-            display_lines = []
-            for line in lines:
-                if any(x in line.upper() for x in ["제목:", "요약:"]):
-                    # '제목:' 또는 '요약:' 레이블 제거
-                    clean_line = re.sub(r'^\d*\.?\s*(제목|요약):\s*', '', line, flags=re.IGNORECASE).strip()
-                    if clean_line:
-                        if "제목:" in line:
-                            display_lines.append(f'<strong style="font-size: 17px; color: #1a365d; display: block; margin-bottom: 8px;">{clean_line}</strong>')
-                        else:
-                            display_lines.append(clean_line)
+            # 본문 내 URL 및 '더 알아보기' 문구 제거
+            item_html = item.replace('\n', '<br>')
+            # 형식 태그 및 URL 라벨 제거 (URL 라벨 줄 전체 제거)
+            item_html = re.sub(r'(<br>)?(?:\d+\.\s*)?Image:.*', '', item_html, flags=re.IGNORECASE)
+            item_html = re.sub(r'(<br>)?(?:\d+\.\s*)?URL:.*', '', item_html, flags=re.IGNORECASE)
             
-            item_html = "<br>".join(display_lines)
+            # 본문 내 '더 알아보기' 텍스트 제거 (중복 방지)
+            item_html = item_html.replace('더 알아보기', '')
             
-            # 카드 레이아웃
-            if img_url and show_image:
+            # 불필요한 공백/줄바꿈 정리
+            item_html = re.sub(r'(<br>\s*)+', '<br>', item_html).strip('<br> ')
+            
+            # 카드 레이아웃 (테이블 기반)
+            if img_url:
                 content_html = f"""
                 <tr>
                     <td class="mobile-padding" style="padding: 25px 20px; border-bottom: 1px solid #eeeeee;">
@@ -110,7 +107,7 @@ def format_as_html(news_summary, paper_summary):
                             <tr>
                                 <td class="stack-column" width="30%" style="vertical-align: top; padding-right: 20px;">
                                     <a href="{article_url}" target="_blank" style="text-decoration: none;">
-                                        <img src="{img_url}" alt="News Image" style="width: 100%; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid #f0f0f0;" onerror="this.style.display='none'">
+                                        <img src="{img_url}" alt="News Image" style="width: 100%; height: 140px; aspect-ratio: 1/1; object-fit: cover; border-radius: 8px; border: 1px solid #f0f0f0;" onerror="this.style.display='none'">
                                     </a>
                                 </td>
                                 <td class="stack-column" width="70%" style="vertical-align: top;">
@@ -118,7 +115,7 @@ def format_as_html(news_summary, paper_summary):
                                         {item_html}
                                     </div>
                                     <div style="margin-top: 15px;">
-                                        <a href="{article_url}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
+                                        <a href="{article_url}" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
                                     </div>
                                 </td>
                             </tr>
@@ -134,7 +131,7 @@ def format_as_html(news_summary, paper_summary):
                             {item_html}
                         </div>
                         <div style="margin-top: 15px;">
-                            <a href="{article_url}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
+                            <a href="{article_url}" style="color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: bold;">더 알아보기 &rarr;</a>
                         </div>
                     </td>
                 </tr>
@@ -143,8 +140,29 @@ def format_as_html(news_summary, paper_summary):
         
         return "\n".join(processed)
 
-    news_items_html = process_summary(news_summary, show_image=True)
-    paper_items_html = process_summary(paper_summary, show_image=False)
+    news_items_html = process_summary(news_summary)
+    paper_items_html = process_summary(paper_summary)
+
+    # 지식 그래프 섹션 HTML (Base64 이미지가 있을 경우에만 생성)
+    graph_section_html = ""
+    if graph_base64:
+        graph_section_html = f"""
+            <!-- 지식 그래프 섹션 -->
+            <tr>
+                <td style="padding: 40px 20px 10px; background-color: #f1f6ff;">
+                    <h2 style="margin: 0; font-size: 20px; color: #1a365d; display: flex; align-items: center;">
+                        <span style="font-size: 24px; margin-right: 8px;">📊</span> 주요 엔티티 관계 그래프
+                    </h2>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 15px 20px 30px; border-bottom: 1px solid #eeeeee; text-align: center;">
+                    <img src="data:image/png;base64,{graph_base64}"
+                         alt="지식 그래프"
+                         style="max-width: 100%; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);">
+                    <p style="margin: 12px 0 0; font-size: 12px; color: #9aa0a6;">뉴스 기사에서 AI가 자동 추출한 엔티티와 관계를 시각화한 그래프입니다.</p>
+                </td>
+            </tr>"""
 
     html = f"""
     <!DOCTYPE html>
@@ -169,7 +187,7 @@ def format_as_html(news_summary, paper_summary):
         <table role="presentation" class="content-container" align="center">
             <!-- 헤더 섹션 -->
                 <td style="padding: 40px 20px; text-align: center; background-color: #1a73e8;">
-                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; letter-spacing: -1px; font-weight: 800;">🚀주간 난임 & 배아 연구 동향 뉴스레터</h1>
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; letter-spacing: -1px; font-weight: 800;">Weekly Insight News</h1>
                     <p style="margin: 10px 0 0; color: #e8f0fe; font-size: 14px; opacity: 0.9;">{current_date} | Gemini AI 가 선별한 최신 동향 전문 브리핑</p>
                 </td>
             </tr>
@@ -183,6 +201,8 @@ def format_as_html(news_summary, paper_summary):
                 </td>
             </tr>
             {news_items_html}
+
+            {graph_section_html}
 
             <!-- 논문 섹션 -->
             <tr>

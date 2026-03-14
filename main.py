@@ -1,6 +1,7 @@
 from crawler import get_google_news, get_pubmed_papers
 from summarizer import summarize_content
 from mailer import send_newsletter, format_as_html
+from knowledge_graph import generate_knowledge_graph
 import os
 from dotenv import load_dotenv
 import time
@@ -11,7 +12,7 @@ def main():
     print("난임 및 배아 연구 동향 리서치 시작...")
 
     # 1. 뉴스 데이터 수집
-    news_items = get_google_news("난임 인공수정", days=7,max_results=10)
+    news_items = get_google_news("난임 OR 인공수정 OR 시험관아기 OR 체외수정 OR 난자동결 OR Infertility OR IVF OR Embryo", days=7,max_results=10)
 
     print(f"수집된 뉴스 개수: {len(news_items)}")
     
@@ -28,12 +29,18 @@ def main():
     # 4. LLM 요약 (Gemini)
     print("Gemini를 사용해 요약 생성 중...")
     news_summary = summarize_content(news_items, category="주요 뉴스")
-    # 60초 동안 프로세스를 중단합니다.
+
+    # 60초 대기 (다음 API 호용 전 RPM 제한 회피)
+    time.sleep(60)
+    # 5. 지식 그래프 생성 (뉴스 요약 후 RPM 대기 시간 활용)
+    graph_base64 = generate_knowledge_graph(news_items)
+
+    # 60초 대기 (다음 API 호용 전 RPM 제한 회피)
     time.sleep(60)
     paper_summary = summarize_content(paper_items, category="주요 논문")
-    
-    # 5. HTML 뉴스레터 생성
-    html_content = format_as_html(news_summary, paper_summary)
+
+    # 6. HTML 뉴스레터 생성
+    html_content = format_as_html(news_summary, paper_summary, graph_base64=graph_base64)
     
     # 6. 이메일 발송
     print("이메일 발송 준비 중...")
