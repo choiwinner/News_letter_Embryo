@@ -29,7 +29,7 @@ def extract_entities_and_relations(news_items: list) -> dict:
         return {"nodes": [], "edges": []}
 
     client = genai.Client(api_key=api_key)
-    model_name = "gemini-3-flash-preview"
+    model_name = "gemini-3.5-flash"
 
     # 뉴스 제목만 추출하여 프롬프트 구성 (토큰 절약)
     titles = "\n".join(f"- {item['title']}" for item in news_items)
