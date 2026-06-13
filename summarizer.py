@@ -56,10 +56,9 @@ def summarize_content(items, category="뉴스"):
     
     # gemini-3-flash는 현재 하루 20회 요청으로 제한이 매우 엄격합니다.
     # 성능이 뛰어나고 할당량(분당 15회)이 더 넉넉한 gemini-2.0-flash를 사용합니다.
-    model_name = "gemini-3.5-flash"
-    # model_name = "gemini-3-flash-preview" 
-    # model_name = "gemini-2.5-flash-lite"
-
+    #model_name = "gemini-3.5-flash"
+    model_name = "gemini-3-flash-preview" 
+    
     prompt = f"""
     당신은 난임 및 생명공학(배아 발생학) 전문가입니다. 다음 제공된 {category} 목록을 바탕으로 주간 브리핑을 작성해 주세요.
     
